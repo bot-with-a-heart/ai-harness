@@ -1,0 +1,7 @@
+/ai-harness
+/ai-harness.exe
+bin/
+dist/
+.gotmp/
+.gocache/
+.env
