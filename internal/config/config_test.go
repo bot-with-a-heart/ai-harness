@@ -28,6 +28,18 @@ func TestInitLoadAndRead(t *testing.T) {
 	if cfg.Providers["lmstudio"]["desktop"].BaseURL == "" {
 		t.Fatal("lmstudio desktop base URL was empty")
 	}
+	if cfg.Memory.Obsidian.Enabled {
+		t.Fatal("obsidian integration should be disabled by default")
+	}
+	if cfg.Memory.Obsidian.Folder != DefaultObsidianFolder {
+		t.Fatalf("obsidian folder = %q, want %q", cfg.Memory.Obsidian.Folder, DefaultObsidianFolder)
+	}
+	if !cfg.Security.Enabled || !cfg.Security.EncryptHistory || !cfg.Security.EncryptMemory || !cfg.Security.EncryptLogs {
+		t.Fatalf("security defaults = %+v", cfg.Security)
+	}
+	if cfg.Security.RetainFullRepoContext {
+		t.Fatal("full repo context retention should be disabled by default")
+	}
 
 	contents, err := Read(path)
 	if err != nil {
@@ -35,6 +47,12 @@ func TestInitLoadAndRead(t *testing.T) {
 	}
 	if !strings.Contains(string(contents), "[providers.lmstudio.desktop]") {
 		t.Fatalf("config contents missing lmstudio provider:\n%s", contents)
+	}
+	if !strings.Contains(string(contents), "[memory.obsidian]") {
+		t.Fatalf("config contents missing obsidian memory section:\n%s", contents)
+	}
+	if !strings.Contains(string(contents), "[security]") {
+		t.Fatalf("config contents missing security section:\n%s", contents)
 	}
 }
 

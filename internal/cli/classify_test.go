@@ -46,14 +46,20 @@ func TestClassifyCommandUsesLMStudio(t *testing.T) {
 	if decision.RecommendedProvider != "lmstudio" || decision.Complexity != "low" {
 		t.Fatalf("decision = %+v", decision)
 	}
+
+	records := historyRecordsForConfig(t, path)
+	if len(records) != 1 || records[0].Command != "classify" || records[0].Provider != "lmstudio" {
+		t.Fatalf("history records = %+v", records)
+	}
 }
 
 func TestClassifyCommandHeuristic(t *testing.T) {
+	path := writeLocalConfig(t, "http://127.0.0.1:1234/v1")
 	cmd := NewRootCommand("test")
 	var out bytes.Buffer
 	cmd.SetOut(&out)
 	cmd.SetErr(&out)
-	cmd.SetArgs([]string{"classify", "--heuristic", "--summary", "Refactor", "my", "AWS", "CDK", "application"})
+	cmd.SetArgs([]string{"classify", "--config", path, "--heuristic", "--summary", "Refactor", "my", "AWS", "CDK", "application"})
 
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("heuristic classify failed: %v\n%s", err, out.String())
@@ -63,6 +69,11 @@ func TestClassifyCommandHeuristic(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Fatalf("summary missing %q:\n%s", want, got)
 		}
+	}
+
+	records := historyRecordsForConfig(t, path)
+	if len(records) != 1 || records[0].Command != "classify" || records[0].Provider != "heuristic" {
+		t.Fatalf("history records = %+v", records)
 	}
 }
 

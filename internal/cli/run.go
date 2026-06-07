@@ -12,6 +12,7 @@ import (
 
 	"ai-harness/internal/classification"
 	repoctx "ai-harness/internal/context"
+	"ai-harness/internal/history"
 	"ai-harness/internal/patch"
 	"ai-harness/internal/providers"
 	"ai-harness/internal/router"
@@ -51,8 +52,13 @@ func newRunCommand() *cobra.Command {
 		Use:   "run [task]",
 		Short: "Classify a task, choose a provider, and execute it",
 		Args:  cobra.MinimumNArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(cmd *cobra.Command, args []string) (runErr error) {
 			task := strings.Join(args, " ")
+			record := history.Record{Command: "run", Task: task}
+			defer func() {
+				runErr = finalizeHistory(classifierOpts.configPath, &record, runErr)
+			}()
+
 			localOpts.configPath = classifierOpts.configPath
 			codexOpts.configPath = classifierOpts.configPath
 
@@ -83,6 +89,7 @@ func newRunCommand() *cobra.Command {
 					CodexModel:    codexModel,
 					TestCommand:   testCommand,
 					WorkingDir:    codexOpts.workingDir,
+					History:       &record,
 				})
 			}
 
@@ -96,6 +103,7 @@ func newRunCommand() *cobra.Command {
 					CodexModel:    codexModel,
 					TestCommand:   testCommand,
 					WorkingDir:    codexOpts.workingDir,
+					History:       &record,
 				})
 			}
 
@@ -110,6 +118,9 @@ func newRunCommand() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("run task: %w", err)
 			}
+			record.Provider = result.ProviderSelected
+			record.Model = result.Response.Model
+			setHistoryClassification(&record, result.Decision)
 
 			printRunResult(cmd.OutOrStdout(), result)
 			return nil
@@ -149,6 +160,7 @@ type safeEditOptions struct {
 	CodexModel    string
 	TestCommand   string
 	WorkingDir    string
+	History       *history.Record
 }
 
 func runSafeEdit(ctx context.Context, cmd *cobra.Command, opts safeEditOptions) error {
@@ -156,6 +168,7 @@ func runSafeEdit(ctx context.Context, cmd *cobra.Command, opts safeEditOptions) 
 	if err != nil {
 		return fmt.Errorf("classify task: %w", err)
 	}
+	setHistoryClassification(opts.History, decision)
 
 	provider, fallback, model, err := providerForEdit(decision.RecommendedProvider, opts)
 	if err != nil {
@@ -189,6 +202,7 @@ func runSafeEdit(ctx context.Context, cmd *cobra.Command, opts safeEditOptions) 
 		Root:           root,
 		TestCommand:    opts.TestCommand,
 		ApprovalReader: bufio.NewReader(cmd.InOrStdin()),
+		History:        opts.History,
 	})
 	if errors.Is(err, errPatchDeclined) {
 		return nil
@@ -201,6 +215,7 @@ func runLocalFirstEdit(ctx context.Context, cmd *cobra.Command, opts safeEditOpt
 	if err != nil {
 		return fmt.Errorf("classify task: %w", err)
 	}
+	setHistoryClassification(opts.History, decision)
 	if opts.LocalProvider == nil {
 		return fmt.Errorf("selected LM Studio provider is not configured")
 	}
@@ -239,6 +254,7 @@ func runLocalFirstEdit(ctx context.Context, cmd *cobra.Command, opts safeEditOpt
 		Root:           root,
 		TestCommand:    opts.TestCommand,
 		ApprovalReader: approvalReader,
+		History:        opts.History,
 	})
 	if localErr == nil {
 		fmt.Fprintln(cmd.OutOrStdout(), "Local attempt completed successfully.")
@@ -251,6 +267,9 @@ func runLocalFirstEdit(ctx context.Context, cmd *cobra.Command, opts safeEditOpt
 	fmt.Fprintf(cmd.OutOrStdout(), "Local attempt failed validation: %v\n", localErr)
 	fmt.Fprintln(cmd.OutOrStdout(), "Escalating to Codex.")
 	fmt.Fprintln(cmd.OutOrStdout())
+	if opts.History != nil {
+		opts.History.Escalated = true
+	}
 
 	escalationSnapshot, err := collectRepositoryContext(ctx, repoctx.Options{
 		Root:         root,
@@ -278,6 +297,7 @@ func runLocalFirstEdit(ctx context.Context, cmd *cobra.Command, opts safeEditOpt
 		Root:           root,
 		TestCommand:    opts.TestCommand,
 		ApprovalReader: approvalReader,
+		History:        opts.History,
 	})
 	if errors.Is(err, errPatchDeclined) {
 		return nil
@@ -300,6 +320,7 @@ type editAttemptOptions struct {
 	Root           string
 	TestCommand    string
 	ApprovalReader *bufio.Reader
+	History        *history.Record
 }
 
 func runEditAttempt(ctx context.Context, cmd *cobra.Command, opts editAttemptOptions) error {
@@ -314,15 +335,24 @@ func runEditAttempt(ctx context.Context, cmd *cobra.Command, opts editAttemptOpt
 	if err != nil {
 		return fmt.Errorf("generate patch with %s provider: %w", opts.ProviderKey, err)
 	}
+	if opts.History != nil {
+		opts.History.Provider = opts.ProviderKey
+		opts.History.Model = response.Model
+		setHistoryClassification(opts.History, opts.Decision)
+	}
 
 	diff, err := patch.ExtractUnifiedDiff(response.Content)
 	if err != nil {
 		return fmt.Errorf("extract generated patch: %w", err)
 	}
+	appendHistoryFiles(opts.History, patch.TouchedFiles(diff))
 
 	printEditPlan(cmd.OutOrStdout(), opts.Decision, opts.Fallback, response.Model, diff)
 	if !confirmPatchReader(opts.ApprovalReader, cmd.OutOrStdout()) {
 		fmt.Fprintln(cmd.OutOrStdout(), "Patch not applied.")
+		if opts.History != nil {
+			opts.History.Status = "declined"
+		}
 		return errPatchDeclined
 	}
 
@@ -333,6 +363,7 @@ func runEditAttempt(ctx context.Context, cmd *cobra.Command, opts editAttemptOpt
 
 	result, testErr := patch.RunTests(ctx, opts.Root, opts.TestCommand, runPatchRunner)
 	printTestResult(cmd.OutOrStdout(), result)
+	appendHistoryTest(opts.History, result)
 	if testErr != nil {
 		return fmt.Errorf("run tests: %w", testErr)
 	}
@@ -465,4 +496,31 @@ func maxDuration(values ...time.Duration) time.Duration {
 		return 10 * time.Minute
 	}
 	return max
+}
+
+func setHistoryClassification(record *history.Record, decision classification.Decision) {
+	if record == nil {
+		return
+	}
+	decisionCopy := decision
+	record.Classification = &decisionCopy
+}
+
+func appendHistoryFiles(record *history.Record, files []string) {
+	if record == nil {
+		return
+	}
+	record.FilesTouched = append(record.FilesTouched, files...)
+}
+
+func appendHistoryTest(record *history.Record, result patch.TestResult) {
+	if record == nil {
+		return
+	}
+	record.TestsRun = append(record.TestsRun, history.TestRun{
+		Command: result.Command,
+		Passed:  result.Passed,
+		Skipped: result.Skipped,
+		Output:  result.Output,
+	})
 }

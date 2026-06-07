@@ -30,6 +30,29 @@ func TestExtractUnifiedDiffRejectsNonDiff(t *testing.T) {
 	}
 }
 
+func TestTouchedFilesFromUnifiedDiff(t *testing.T) {
+	diff := strings.Join([]string{
+		"diff --git a/README.md b/README.md",
+		"--- a/README.md",
+		"+++ b/README.md",
+		"@@ -1 +1,2 @@",
+		" # Test",
+		"+Edited",
+		"diff --git a/internal/old.go b/internal/new.go",
+		"--- a/internal/old.go",
+		"+++ b/internal/new.go",
+		"@@ -1 +1 @@",
+		"-old",
+		"+new",
+	}, "\n")
+
+	got := strings.Join(TouchedFiles(diff), ",")
+	want := "README.md,internal/old.go,internal/new.go"
+	if got != want {
+		t.Fatalf("TouchedFiles = %q, want %q", got, want)
+	}
+}
+
 func TestBuildEscalationPromptIncludesFailureAndDiff(t *testing.T) {
 	prompt := BuildEscalationPrompt("Fix tests", testSnapshotWithDiff(), "local tests failed")
 

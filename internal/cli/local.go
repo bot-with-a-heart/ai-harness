@@ -9,6 +9,7 @@ import (
 	"time"
 
 	appconfig "ai-harness/internal/config"
+	"ai-harness/internal/history"
 	"ai-harness/internal/providers"
 	"ai-harness/internal/providers/lmstudio"
 
@@ -89,7 +90,13 @@ func newAskLocalCommand() *cobra.Command {
 		Use:   "ask-local [prompt]",
 		Short: "Ask LM Studio to answer a prompt",
 		Args:  cobra.MinimumNArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(cmd *cobra.Command, args []string) (runErr error) {
+			prompt := strings.Join(args, " ")
+			record := history.Record{Command: "ask-local", Task: prompt, Provider: "lmstudio"}
+			defer func() {
+				runErr = finalizeHistory(opts.configPath, &record, runErr)
+			}()
+
 			provider, err := loadLMStudioProvider(opts)
 			if err != nil {
 				return err
@@ -100,11 +107,12 @@ func newAskLocalCommand() *cobra.Command {
 
 			response, err := provider.Ask(ctx, providers.AskRequest{
 				Model:  model,
-				Prompt: strings.Join(args, " "),
+				Prompt: prompt,
 			})
 			if err != nil {
 				return fmt.Errorf("ask LM Studio: %w", err)
 			}
+			record.Model = response.Model
 
 			fmt.Fprintf(cmd.OutOrStdout(), "Provider: lmstudio/%s\n", opts.provider)
 			fmt.Fprintf(cmd.OutOrStdout(), "Model: %s\n\n", response.Model)

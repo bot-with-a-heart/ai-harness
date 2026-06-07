@@ -8,6 +8,7 @@ import (
 	"time"
 
 	appconfig "ai-harness/internal/config"
+	"ai-harness/internal/history"
 	"ai-harness/internal/providers"
 	codexprovider "ai-harness/internal/providers/codex"
 
@@ -44,7 +45,13 @@ func newAskCodexCommand() *cobra.Command {
 		Use:   "ask-codex [prompt]",
 		Short: "Ask Codex CLI to answer a prompt",
 		Args:  cobra.MinimumNArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(cmd *cobra.Command, args []string) (runErr error) {
+			prompt := strings.Join(args, " ")
+			record := history.Record{Command: "ask-codex", Task: prompt, Provider: "codex"}
+			defer func() {
+				runErr = finalizeHistory(opts.configPath, &record, runErr)
+			}()
+
 			provider, err := loadCodexProvider(opts)
 			if err != nil {
 				return err
@@ -55,11 +62,12 @@ func newAskCodexCommand() *cobra.Command {
 
 			response, err := provider.Ask(ctx, providers.AskRequest{
 				Model:  model,
-				Prompt: strings.Join(args, " "),
+				Prompt: prompt,
 			})
 			if err != nil {
 				return fmt.Errorf("ask Codex: %w", err)
 			}
+			record.Model = response.Model
 
 			fmt.Fprintf(cmd.OutOrStdout(), "Provider: codex/%s\n", opts.provider)
 			fmt.Fprintf(cmd.OutOrStdout(), "Model: %s\n\n", response.Model)

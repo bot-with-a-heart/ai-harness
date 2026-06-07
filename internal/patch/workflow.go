@@ -141,6 +141,24 @@ func ExtractUnifiedDiff(raw string) (string, error) {
 	return diff + "\n", nil
 }
 
+func TouchedFiles(diff string) []string {
+	seen := map[string]bool{}
+	var files []string
+	for _, line := range strings.Split(diff, "\n") {
+		switch {
+		case strings.HasPrefix(line, "--- "):
+			files = appendDiffFile(files, seen, strings.TrimSpace(strings.TrimPrefix(line, "--- ")))
+		case strings.HasPrefix(line, "+++ "):
+			files = appendDiffFile(files, seen, strings.TrimSpace(strings.TrimPrefix(line, "+++ ")))
+		case strings.HasPrefix(line, "diff --git "):
+			for _, field := range strings.Fields(strings.TrimSpace(strings.TrimPrefix(line, "diff --git "))) {
+				files = appendDiffFile(files, seen, field)
+			}
+		}
+	}
+	return files
+}
+
 func Validate(root string, diff string, runner Runner) error {
 	if runner == nil {
 		runner = ExecRunner{}
@@ -245,6 +263,32 @@ func looksLikeUnifiedDiff(diff string) bool {
 		}
 	}
 	return hasHeader && hasHunk
+}
+
+func appendDiffFile(files []string, seen map[string]bool, raw string) []string {
+	file := cleanDiffFile(raw)
+	if file == "" || seen[file] {
+		return files
+	}
+	seen[file] = true
+	return append(files, file)
+}
+
+func cleanDiffFile(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || raw == "/dev/null" {
+		return ""
+	}
+	if i := strings.IndexByte(raw, '\t'); i >= 0 {
+		raw = raw[:i]
+	}
+	raw = strings.Trim(raw, `"`)
+	raw = strings.TrimPrefix(raw, "a/")
+	raw = strings.TrimPrefix(raw, "b/")
+	if raw == "" || raw == "/dev/null" {
+		return ""
+	}
+	return filepath.ToSlash(raw)
 }
 
 func shellCommand(command string) (string, []string) {

@@ -1,6 +1,7 @@
 package catalog
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -97,6 +98,7 @@ func Load(path string) (Catalog, error) {
 	if err != nil {
 		return Catalog{}, fmt.Errorf("read model catalog: %w", err)
 	}
+	contents = bytes.TrimPrefix(contents, []byte{0xEF, 0xBB, 0xBF})
 
 	var catalog Catalog
 	if err := json.Unmarshal(contents, &catalog); err != nil {

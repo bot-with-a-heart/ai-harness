@@ -148,6 +148,21 @@ func TestRunEditApprovalAppliesPatchAndRunsTests(t *testing.T) {
 			t.Fatalf("commands missing %q: %+v", want, runner.commands)
 		}
 	}
+
+	records := historyRecordsForConfig(t, path)
+	if len(records) != 1 {
+		t.Fatalf("history records = %+v", records)
+	}
+	record := records[0]
+	if record.Command != "run" || record.Provider != "lmstudio" || record.Model != "local-model" || record.Status != "completed" || !record.Success {
+		t.Fatalf("history record = %+v", record)
+	}
+	if strings.Join(record.FilesTouched, ",") != "README.md" {
+		t.Fatalf("files touched = %+v", record.FilesTouched)
+	}
+	if len(record.TestsRun) != 1 || record.TestsRun[0].Command != "echo ok" || !record.TestsRun[0].Passed {
+		t.Fatalf("tests run = %+v", record.TestsRun)
+	}
 }
 
 func TestRunLocalFirstCompletesAfterLocalTestsPass(t *testing.T) {
@@ -285,6 +300,18 @@ func TestRunLocalFirstEscalatesWhenLocalTestsFail(t *testing.T) {
 	}
 	if local.calls != 1 || codex.calls != 1 {
 		t.Fatalf("provider calls: local=%d codex=%d", local.calls, codex.calls)
+	}
+
+	records := historyRecordsForConfig(t, path)
+	if len(records) != 1 {
+		t.Fatalf("history records = %+v", records)
+	}
+	record := records[0]
+	if !record.Escalated || record.Provider != "codex" || record.Model != "codex-model" {
+		t.Fatalf("history record = %+v", record)
+	}
+	if len(record.TestsRun) != 2 || record.TestsRun[0].Passed || !record.TestsRun[1].Passed {
+		t.Fatalf("tests run = %+v", record.TestsRun)
 	}
 }
 

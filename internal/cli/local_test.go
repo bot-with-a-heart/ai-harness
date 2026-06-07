@@ -63,6 +63,11 @@ func TestAskLocalCommand(t *testing.T) {
 			t.Fatalf("ask-local output missing %q:\n%s", want, got)
 		}
 	}
+
+	records := historyRecordsForConfig(t, path)
+	if len(records) != 1 || records[0].Command != "ask-local" || records[0].Provider != "lmstudio" || records[0].Model != "model-a" {
+		t.Fatalf("history records = %+v", records)
+	}
 }
 
 func TestLoadLMStudioProviderReportsAvailableProviders(t *testing.T) {

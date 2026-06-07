@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"ai-harness/internal/classification"
+	"ai-harness/internal/history"
 
 	"github.com/spf13/cobra"
 )
@@ -26,14 +27,21 @@ func newClassifyCommand() *cobra.Command {
 		Use:   "classify [task]",
 		Short: "Classify a task and recommend LM Studio or Codex",
 		Args:  cobra.MinimumNArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(cmd *cobra.Command, args []string) (runErr error) {
 			task := strings.Join(args, " ")
+			record := history.Record{Command: "classify", Task: task}
+			defer func() {
+				runErr = finalizeHistory(opts.configPath, &record, runErr)
+			}()
 
 			var decision classification.Decision
 			var err error
 			if heuristicOnly {
+				record.Provider = "heuristic"
 				decision, err = classification.Heuristic(task)
 			} else {
+				record.Provider = "lmstudio"
+				record.Model = model
 				provider, loadErr := loadLMStudioProvider(opts)
 				if loadErr != nil {
 					return loadErr
@@ -48,6 +56,8 @@ func newClassifyCommand() *cobra.Command {
 				if err != nil && !noFallback {
 					decision, err = classification.Heuristic(task)
 					if err == nil {
+						record.Provider = "heuristic"
+						record.Model = ""
 						decision.Reason = "Heuristic fallback after local classifier failed: " + decision.Reason
 					}
 				}
@@ -55,6 +65,7 @@ func newClassifyCommand() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("classify task: %w", err)
 			}
+			setHistoryClassification(&record, decision)
 
 			if summary {
 				printClassificationSummary(cmd.OutOrStdout(), decision)

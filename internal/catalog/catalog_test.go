@@ -1,6 +1,7 @@
 package catalog
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -35,5 +36,21 @@ func TestSaveLoadAndFindModel(t *testing.T) {
 	}
 	if model.ID != "b-model" {
 		t.Fatalf("model ID = %q", model.ID)
+	}
+}
+
+func TestLoadAcceptsUTF8BOM(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "model-catalog.json")
+	contents := append([]byte{0xEF, 0xBB, 0xBF}, []byte(`{"source":"test","models":[{"id":"model-a"}]}`)...)
+	if err := os.WriteFile(path, contents, 0o600); err != nil {
+		t.Fatalf("write catalog: %v", err)
+	}
+
+	loaded, err := Load(path)
+	if err != nil {
+		t.Fatalf("load catalog: %v", err)
+	}
+	if loaded.Models[0].ID != "model-a" {
+		t.Fatalf("models = %+v", loaded.Models)
 	}
 }

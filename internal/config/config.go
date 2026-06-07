@@ -24,6 +24,8 @@ type Config struct {
 	DefaultMode string                         `koanf:"default_mode" mapstructure:"default_mode" toml:"default_mode" validate:"required,oneof=auto local codex"`
 	Providers   map[string]map[string]Provider `koanf:"providers" mapstructure:"providers" toml:"providers" validate:"required"`
 	Routing     Routing                        `koanf:"routing" mapstructure:"routing" toml:"routing" validate:"required"`
+	Memory      Memory                         `koanf:"memory" mapstructure:"memory" toml:"memory"`
+	Security    Security                       `koanf:"security" mapstructure:"security" toml:"security"`
 }
 
 type Provider struct {
@@ -39,9 +41,39 @@ type Routing struct {
 	EscalateOnFailure bool `koanf:"escalate_on_failure" mapstructure:"escalate_on_failure" toml:"escalate_on_failure"`
 }
 
+type Memory struct {
+	Obsidian Obsidian `koanf:"obsidian" mapstructure:"obsidian" toml:"obsidian"`
+}
+
+type Obsidian struct {
+	Enabled            bool   `koanf:"enabled" mapstructure:"enabled" toml:"enabled"`
+	VaultPath          string `koanf:"vault_path" mapstructure:"vault_path" toml:"vault_path,omitempty"`
+	Folder             string `koanf:"folder" mapstructure:"folder" toml:"folder,omitempty"`
+	ExportHistoryLimit int    `koanf:"export_history_limit" mapstructure:"export_history_limit" toml:"export_history_limit,omitempty"`
+}
+
+type Security struct {
+	Enabled               bool   `koanf:"enabled" mapstructure:"enabled" toml:"enabled"`
+	Required              bool   `koanf:"required" mapstructure:"required" toml:"required"`
+	KeyProvider           string `koanf:"key_provider" mapstructure:"key_provider" toml:"key_provider,omitempty"`
+	KeyID                 string `koanf:"key_id" mapstructure:"key_id" toml:"key_id,omitempty"`
+	KDFSalt               string `koanf:"kdf_salt" mapstructure:"kdf_salt" toml:"kdf_salt,omitempty"`
+	EncryptHistory        bool   `koanf:"encrypt_history" mapstructure:"encrypt_history" toml:"encrypt_history"`
+	EncryptMemory         bool   `koanf:"encrypt_memory" mapstructure:"encrypt_memory" toml:"encrypt_memory"`
+	EncryptLogs           bool   `koanf:"encrypt_logs" mapstructure:"encrypt_logs" toml:"encrypt_logs"`
+	RetainFullRepoContext bool   `koanf:"retain_full_repo_context" mapstructure:"retain_full_repo_context" toml:"retain_full_repo_context"`
+	RecoveryExported      bool   `koanf:"recovery_exported" mapstructure:"recovery_exported" toml:"recovery_exported"`
+}
+
 type InitOptions struct {
 	Force bool
 }
+
+const (
+	DefaultObsidianFolder       = "AI Harness"
+	DefaultObsidianHistoryLimit = 20
+	DefaultSecurityKeyProvider  = "os-keychain"
+)
 
 func Default() Config {
 	return Config{
@@ -68,6 +100,23 @@ func Default() Config {
 		Routing: Routing{
 			LocalFirst:        true,
 			EscalateOnFailure: true,
+		},
+		Memory: Memory{
+			Obsidian: Obsidian{
+				Enabled:            false,
+				Folder:             DefaultObsidianFolder,
+				ExportHistoryLimit: DefaultObsidianHistoryLimit,
+			},
+		},
+		Security: Security{
+			Enabled:               true,
+			Required:              false,
+			KeyProvider:           DefaultSecurityKeyProvider,
+			EncryptHistory:        true,
+			EncryptMemory:         true,
+			EncryptLogs:           true,
+			RetainFullRepoContext: false,
+			RecoveryExported:      false,
 		},
 	}
 }
@@ -157,6 +206,7 @@ func Load(path string) (Config, error) {
 	if err := k.Unmarshal("", &cfg); err != nil {
 		return Config{}, fmt.Errorf("decode config: %w", err)
 	}
+	ApplyDefaults(&cfg)
 
 	if err := Validate(cfg); err != nil {
 		return Config{}, err
@@ -186,7 +236,32 @@ func Read(path string) ([]byte, error) {
 	return contents, nil
 }
 
+func Write(path string, cfg Config) error {
+	if path == "" {
+		var err error
+		path, err = DefaultPath()
+		if err != nil {
+			return err
+		}
+	}
+	ApplyDefaults(&cfg)
+
+	contents, err := Marshal(cfg)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return fmt.Errorf("create config directory: %w", err)
+	}
+	if err := os.WriteFile(path, contents, 0o600); err != nil {
+		return fmt.Errorf("write config: %w", err)
+	}
+	return nil
+}
+
 func Marshal(cfg Config) ([]byte, error) {
+	ApplyDefaults(&cfg)
+
 	var buf bytes.Buffer
 	enc := toml.NewEncoder(&buf)
 	enc.SetArraysMultiline(true)
@@ -198,7 +273,24 @@ func Marshal(cfg Config) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
+func ApplyDefaults(cfg *Config) {
+	if cfg == nil {
+		return
+	}
+	if cfg.Memory.Obsidian.Folder == "" {
+		cfg.Memory.Obsidian.Folder = DefaultObsidianFolder
+	}
+	if cfg.Memory.Obsidian.ExportHistoryLimit <= 0 {
+		cfg.Memory.Obsidian.ExportHistoryLimit = DefaultObsidianHistoryLimit
+	}
+	if cfg.Security.KeyProvider == "" {
+		cfg.Security.KeyProvider = DefaultSecurityKeyProvider
+	}
+}
+
 func Validate(cfg Config) error {
+	ApplyDefaults(&cfg)
+
 	if err := validator.New().Struct(cfg); err != nil {
 		return fmt.Errorf("validate config: %w", err)
 	}

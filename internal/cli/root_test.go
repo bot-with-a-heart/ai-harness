@@ -36,9 +36,24 @@ func TestHelpCommand(t *testing.T) {
 	}
 
 	got := out.String()
-	for _, want := range []string{"AI Harness routes", "ask-codex", "ask-local", "classify", "config", "context", "models", "run", "version", "help"} {
+	for _, want := range []string{"AI Harness routes", "ask-codex", "ask-local", "classify", "config", "context", "history", "memory", "models", "run", "security", "version", "help", "--log-level", "--log-json"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("help output missing %q:\n%s", want, got)
 		}
+	}
+}
+
+func TestInvalidLogLevelFails(t *testing.T) {
+	cmd := NewRootCommand("test")
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"--log-level", "chatty", "version"})
+
+	if err := cmd.Execute(); err == nil {
+		t.Fatal("command succeeded with invalid log level")
+	}
+	if !strings.Contains(out.String(), `invalid log level "chatty"`) {
+		t.Fatalf("unexpected output:\n%s", out.String())
 	}
 }
